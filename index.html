@@ -1,0 +1,210 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Leave Balance Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .loading {
+            animation: pulse 1.5s infinite;
+        }
+        @keyframes pulse {
+            0% { opacity: 0.5; }
+            50% { opacity: 1; }
+            100% { opacity: 0.5; }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="container mx-auto px-4 py-8">
+        <!-- Header -->
+        <div class="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <h1 class="text-3xl font-bold text-gray-800 mb-2">Leave Balance Dashboard</h1>
+            <p class="text-gray-600">Track and predict your leave balance</p>
+        </div>
+
+        <!-- Main Content -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <!-- Leave Balance Card -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Current Leave Balance</h2>
+                <div id="currentBalance" class="loading">Loading...</div>
+            </div>
+
+            <!-- Leave History Chart -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Leave History</h2>
+                <canvas id="leaveHistoryChart"></canvas>
+            </div>
+
+            <!-- Leave Prediction -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Leave Balance Prediction</h2>
+                <canvas id="leavePredictionChart"></canvas>
+            </div>
+
+            <!-- Leave Details Table -->
+            <div class="bg-white rounded-lg shadow-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Leave Details</h2>
+                <div class="overflow-x-auto">
+                    <table id="leaveTable" class="min-w-full table-auto">
+                        <thead>
+                            <tr class="bg-gray-100">
+                                <th class="px-4 py-2">Period</th>
+                                <th class="px-4 py-2">Balance</th>
+                            </tr>
+                        </thead>
+                        <tbody class="loading">
+                            <tr><td colspan="2" class="text-center py-4">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let historyChart = null;
+        let predictionChart = null;
+
+        async function fetchAndProcessData() {
+            try {
+                const response = await fetch('https://db.zetaverse.one/storage/v1/object/public/app-uploads/spreadsheet-1744282084534/yqro7czDqacvOsbkLaQdtq3JaS93/66yqj0w9.csv');
+                const csvText = await response.text();
+                
+                Papa.parse(csvText, {
+                    header: true,
+                    skipEmptyLines: true,
+                    complete: function(results) {
+                        processData(results.data);
+                    },
+                    error: function(error) {
+                        console.error('Error parsing CSV:', error);
+                    }
+                });
+            } catch (error) {
+                console.error('Error fetching CSV:', error);
+            }
+        }
+
+        function processData(data) {
+            // Process data for visualization
+            const periods = data.map(row => row['Leave Period'] || '').filter(Boolean);
+            const balances = data.map(row => parseFloat(row['Balance'] || 0));
+
+            updateCurrentBalance(balances[balances.length - 1]);
+            updateLeaveTable(data);
+            createHistoryChart(periods, balances);
+            createPredictionChart(periods, balances);
+        }
+
+        function updateCurrentBalance(balance) {
+            const balanceDiv = document.getElementById('currentBalance');
+            balanceDiv.classList.remove('loading');
+            balanceDiv.innerHTML = `
+                <div class="text-4xl font-bold text-blue-600">${balance || 0}</div>
+                <div class="text-gray-500 mt-2">Days Available</div>
+            `;
+        }
+
+        function updateLeaveTable(data) {
+            const tbody = document.querySelector('#leaveTable tbody');
+            tbody.innerHTML = data.map(row => `
+                <tr class="border-b">
+                    <td class="px-4 py-2">${row['Leave Period'] || '-'}</td>
+                    <td class="px-4 py-2">${row['Balance'] || 0}</td>
+                </tr>
+            `).join('');
+        }
+
+        function createHistoryChart(periods, balances) {
+            const ctx = document.getElementById('leaveHistoryChart').getContext('2d');
+            
+            if (historyChart) {
+                historyChart.destroy();
+            }
+
+            historyChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: periods,
+                    datasets: [{
+                        label: 'Leave Balance',
+                        data: balances,
+                        borderColor: 'rgb(59, 130, 246)',
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Historical Leave Balance'
+                        }
+                    }
+                }
+            });
+        }
+
+        function createPredictionChart(periods, balances) {
+            // Simple linear regression for prediction
+            const futureMonths = 6;
+            const predictedBalances = [...balances];
+            const predictedPeriods = [...periods];
+            
+            // Calculate trend
+            const trend = (balances[balances.length - 1] - balances[0]) / balances.length;
+            
+            for (let i = 1; i <= futureMonths; i++) {
+                const nextBalance = balances[balances.length - 1] + (trend * i);
+                predictedBalances.push(nextBalance);
+                predictedPeriods.push(`Prediction ${i}`);
+            }
+
+            const ctx = document.getElementById('leavePredictionChart').getContext('2d');
+            
+            if (predictionChart) {
+                predictionChart.destroy();
+            }
+
+            predictionChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: predictedPeriods,
+                    datasets: [{
+                        label: 'Actual',
+                        data: balances,
+                        borderColor: 'rgb(59, 130, 246)',
+                        tension: 0.1
+                    },
+                    {
+                        label: 'Predicted',
+                        data: predictedBalances.slice(-futureMonths),
+                        borderColor: 'rgb(239, 68, 68)',
+                        borderDash: [5, 5],
+                        tension: 0.1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Leave Balance Prediction'
+                        }
+                    }
+                }
+            });
+        }
+
+        // Initialize the application
+        fetchAndProcessData();
+    </script>
+<script>document.body.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); return }, { passive: false })</script>
+	</body>
+</html>
